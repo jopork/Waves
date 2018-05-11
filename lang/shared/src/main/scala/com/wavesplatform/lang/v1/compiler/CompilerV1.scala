@@ -12,6 +12,8 @@ import com.wavesplatform.lang.v1.evaluator.ctx.PredefFunction.FunctionTypeSignat
 import com.wavesplatform.lang.v1.parser.BinaryOperation._
 import com.wavesplatform.lang.v1.parser.Expressions.BINARY_OP
 import com.wavesplatform.lang.v1.parser.{BinaryOperation, Expressions, Parser}
+import com.wavesplatform.lang.v1.parser.Expressions.PART
+import com.wavesplatform.lang.v1.parser.{Expressions, Parser}
 import monix.eval.Coeval
 
 import scala.util.Try
@@ -22,11 +24,14 @@ class CompilerV1(ctx: CompilerContext) extends ExprCompiler {
 
   override def compile(input: String, directives: List[Directive]): Either[String, version.ExprT] = {
     Parser(input) match {
-      case fastparse.core.Parsed.Success(value, _) =>
-        CompilerV1(ctx, value) match {
-          case Left(err)   => Left(err.toString)
-          case Right(expr) => Right(expr)
-        }
+      case fastparse.core.Parsed.Success(xs, _) =>
+        if (xs.size > 1) Left("Too many expressions")
+        else if (xs.isEmpty) Left("No expression")
+        else
+          CompilerV1(ctx, xs.head) match {
+            case Left(err)   => Left(err.toString)
+            case Right(expr) => Right(expr)
+          }
       case f @ fastparse.core.Parsed.Failure(_, _, _) => Left(f.toString)
     }
   }
@@ -38,10 +43,12 @@ object CompilerV1 {
   type CompilationResult[T]     = Either[TypeResolutionError, T]
   private type SetTypeResult[T] = EitherT[Coeval, String, T]
 
+  type ResolvedArgsResult = EitherT[Coeval, String, List[EXPR]]
+
   private def compile(ctx: CompilerContext, t: SetTypeResult[Expressions.EXPR]): SetTypeResult[EXPR] = t.flatMap {
     case x: Expressions.CONST_LONG       => EitherT.pure(CONST_LONG(x.value))
-    case x: Expressions.CONST_BYTEVECTOR => EitherT.pure(CONST_BYTEVECTOR(x.value))
-    case x: Expressions.CONST_STRING     => EitherT.pure(CONST_STRING(x.value))
+    case Expressions.CONST_BYTEVECTOR(p) => handlePart(p)(CONST_BYTEVECTOR)
+    case Expressions.CONST_STRING(p)     => handlePart(p)(CONST_STRING)
     case Expressions.TRUE                => EitherT.pure(TRUE)
     case Expressions.FALSE               => EitherT.pure(FALSE)
     case getter: Expressions.GETTER      => compileGetter(ctx, getter)
@@ -228,6 +235,46 @@ object CompilerV1 {
       }
       compiled <- compileBlock(updatedCtx, Expressions.BLOCK(Expressions.LET(rootMatchTmpArg, expr), ifBasedCases))
     } yield compiled
+  }
+
+  private def resolvedFuncArguments(ctx: CompilerContext, args: List[Expressions.EXPR]): ResolvedArgsResult = {
+    import cats.instances.list._
+    val r: List[SetTypeResult[EXPR]] = args.map(arg => setType(ctx, EitherT.pure(arg)))(collection.breakOut)
+    r.sequence[SetTypeResult, EXPR]
+  }
+
+  private def matchFuncOverload(funcName: String,
+                                funcArgs: List[Expressions.EXPR],
+                                resolvedArgs: List[EXPR],
+                                f: FunctionTypeSignature): Either[String, EXPR] = {
+    val argTypes   = f.args
+    val resultType = f.result
+    if (funcArgs.lengthCompare(argTypes.size) != 0)
+      Left(s"Function '$funcName' requires ${argTypes.size} arguments, but ${funcArgs.size} are provided")
+    else {
+      val typedExpressionArgumentsAndTypedPlaceholders: List[(EXPR, TYPEPLACEHOLDER)] = resolvedArgs.zip(argTypes)
+
+      val typePairs = typedExpressionArgumentsAndTypedPlaceholders.map { case (typedExpr, tph) => (typedExpr.tpe, tph) }
+      for {
+        resolvedTypeParams <- TypeInferrer(typePairs)
+        resolvedResultType <- TypeInferrer.inferResultType(resultType, resolvedTypeParams)
+      } yield
+        FUNCTION_CALL(
+          FunctionHeader(funcName, f.args.map(FunctionHeaderType.fromTypePlaceholder)),
+          typedExpressionArgumentsAndTypedPlaceholders.map(_._1),
+          resolvedResultType
+        )
+    }
+  }
+
+  private def handlePart[T](part: PART[T])(f: T => EXPR): SetTypeResult[EXPR] = part match {
+    case PART.VALID(x)            => EitherT.pure(f(x))
+    case PART.INVALID(x, message) => EitherT.leftT[Coeval, EXPR](s"$message: $x")
+  }
+
+  private def handlePart[T](part: PART[T])(f: T => EXPR): SetTypeResult[EXPR] = part match {
+    case PART.VALID(x)            => EitherT.pure(f(x))
+    case PART.INVALID(x, message) => EitherT.leftT[Coeval, EXPR](s"$message: $x")
   }
 
   def apply(c: CompilerContext, expr: Expressions.EXPR): CompilationResult[EXPR] = {

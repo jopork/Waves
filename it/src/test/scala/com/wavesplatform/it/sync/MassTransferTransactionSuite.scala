@@ -251,9 +251,6 @@ class MassTransferTransactionSuite extends BaseTransactionSuite with CancelAfter
     val transfersAfterTrans = txSender.as[MassTransferRequest].transfers
     assert(transfers.equals(transfersAfterTrans))
 
-    // ...and compact list for recipients
-    val jsTxResipient = Json.parse(sender.get(s"/transactions/address/$secondAddress/limit/10").getResponseBody)
-
     val txRecipient = Json
       .parse(
         sender
