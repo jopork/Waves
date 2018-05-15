@@ -180,10 +180,10 @@ class SetScriptTransactionSuite extends BaseTransactionSuite with CancelAfterFai
       val untyped = Parser(s"""
         let A = base58'${ByteStr(acc3.publicKey)}'
 
-        let AC = sigVerify(tx.bodyBytes,tx.proof0,A)
-        let heightVerification = if (height > $heightBefore + 10) then true else false
+        let AC = sigVerify(tx.bodyBytes,tx.proofs[0],A)
+        let heightVerification = (height > $heightBefore + 10)
 
-        AC && heightVerification
+        AC && heightVerification || (size(tx.transfers) >= 3) && (tx.transfers[0].amount == 100000000)
         """.stripMargin).get.value
       CompilerV1(dummyTypeCheckerContext, untyped).explicitGet()
     }
