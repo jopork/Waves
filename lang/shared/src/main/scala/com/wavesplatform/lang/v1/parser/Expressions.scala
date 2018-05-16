@@ -10,9 +10,9 @@ object Expressions {
     case class INVALID(consumed: String, message: String) extends PART[Nothing]
   }
 
-  case class LET(name: PART[String], value: EXPR, types: Seq[String] = Seq.empty)
+  case class LET(name: PART[String], value: EXPR, types: Seq[PART[String]])
   object LET {
-    def apply(name: String, value: EXPR): LET = LET(PART.VALID(name), value)
+    def apply(name: String, value: EXPR, types: Seq[String]): LET = LET(PART.VALID(name), value, types.map(PART.VALID(_)))
   }
 
   sealed trait EXPR
@@ -50,7 +50,7 @@ object Expressions {
     def apply(name: String, args: List[EXPR]): FUNCTION_CALL = FUNCTION_CALL(PART.VALID(name), args)
   }
 
-  case class MATCH_CASE(newVarName: Option[String], types: Seq[String], expr: EXPR)
+  case class MATCH_CASE(newVarName: Option[PART[String]], types: Seq[PART[String]], expr: EXPR)
   case class MATCH(expr: EXPR, cases: Seq[MATCH_CASE]) extends EXPR
 
   case class INVALID(message: String, next: Option[EXPR] = None) extends EXPR

@@ -88,7 +88,7 @@ object Parser {
   private val falseP: P[FALSE.type]  = P("false").map(_ => FALSE)
   private val bracesP: P[EXPR]       = P("(" ~ expr ~ ")")
   private val curlyBracesP: P[EXPR]  = P("{" ~ expr ~ "}")
-  private val letP: P[LET]           = P("let" ~ varName ~ "=" ~ expr).map(Function.tupled(LET(_, _)))
+  private val letP: P[LET]           = P("let" ~ varName ~ "=" ~ expr).map(Function.tupled(LET(_, _, Seq.empty)))
   private val refP: P[REF]           = P(varName).map(REF(_))
   private val ifP: P[IF]             = P("if" ~ bracesP ~ "then" ~ expr ~ "else" ~ expr).map { case (x, y, z) => IF(x, y, z) }
 
@@ -101,9 +101,9 @@ object Parser {
   private case class Args(args: Seq[EXPR])      extends Accessor
   private case class ListIndex(index: EXPR)     extends Accessor
 
-  private val typesP: P[Seq[String]]    = varName.rep(min = 1, sep = "|")
-  private val matchCaseP: P[MATCH_CASE] = P("case" ~ varName ~ ":" ~ typesP ~ "=>" ~ expr).map { case (v, types, e) => MATCH_CASE(Some(v), types, e) }
-  private lazy val matchP: P[MATCH]     = P("match" ~ expr ~ "{" ~ matchCaseP.rep(min = 1) ~ "}").map { case (e, cases) => MATCH(e, cases.toList) }
+  private val typesP: P[Seq[PART[String]]] = varName.rep(min = 1, sep = "|")
+  private val matchCaseP: P[MATCH_CASE]    = P("case" ~ varName ~ ":" ~ typesP ~ "=>" ~ expr).map { case (v, types, e) => MATCH_CASE(Some(v), types, e) }
+  private lazy val matchP: P[MATCH]        = P("match" ~ expr ~ "{" ~ matchCaseP.rep(min = 1) ~ "}").map { case (e, cases) => MATCH(e, cases.toList) }
 
   private val accessP: P[Accessor] = P(("." ~~ varName).map(Getter) | ("(" ~/ functionCallArgs.map(Args) ~ ")")) | ("[" ~/ expr.map(ListIndex) ~ "]")
 
